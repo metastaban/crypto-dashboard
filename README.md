@@ -1,21 +1,22 @@
 # Cryptocurrency Dashboard
 
-A real-time cryptocurrency tracking dashboard built with Streamlit and Binance API. Track your favorite cryptocurrencies, view technical indicators, and analyze market trends with a modern, dark-themed interface.
+A real-time cryptocurrency tracking dashboard built with Streamlit and CryptoCompare API. Monitor cryptocurrency prices, market statistics, and trends with a modern, responsive interface.
 
 ## Features
 
 - Real-time cryptocurrency price tracking
-- Multi-currency support (USD, EUR, GBP, JPY, TRY, BTC)
-- Technical indicators (RSI, MACD)
-- Candlestick charts with volume analysis
-- Modern dark theme interface
-- Responsive design
+- 24-hour market statistics
+- Multiple currency support
+- Responsive design for all devices
+- Modern, dark-themed UI
+- Dynamic price change indicators
+- Market cap and volume tracking
 
 ## Installation
 
 1. Clone the repository:
 ```bash
-git clone [your-repo-url]
+git clone https://github.com/metastaban/crypto-dashboard.git
 cd financial_dashboard
 ```
 
@@ -32,30 +33,40 @@ pip install -r requirements.txt
 
 ## Usage
 
-1. Run the Streamlit app:
+1. Start the Streamlit app:
 ```bash
 streamlit run app.py
 ```
 
 2. Open your browser and navigate to `http://localhost:8501`
 
-3. Use the sidebar to:
-   - Select your cryptocurrency
-   - Choose your preferred currency
-   - Set time intervals
-   - Select date range
+## Dependencies
 
-## Technologies Used
+- Python 3.8+
+- Streamlit 1.29.0
+- Pandas 2.1.4
+- Plotly 5.18.0
+- CryptoCompare 0.7.6
+- NumPy 1.26.2
 
-- [Streamlit](https://streamlit.io/) - Web interface
-- [Python-Binance](https://python-binance.readthedocs.io/) - Binance API wrapper
-- [Plotly](https://plotly.com/) - Interactive charts
-- [Pandas](https://pandas.pydata.org/) - Data manipulation
+## Data Source
+
+This dashboard uses the [CryptoCompare API](https://min-api.cryptocompare.com/) for real-time cryptocurrency data.
 
 ## Contributing
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ## License
 
-[MIT](https://choosealicense.com/licenses/mit/)
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- [Streamlit](https://streamlit.io/) for the amazing framework
+- [CryptoCompare](https://www.cryptocompare.com/) for the cryptocurrency data API
+- [Plotly](https://plotly.com/) for interactive charts

@@ -2,213 +2,141 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
 import time
 import numpy as np
 import requests
+import cryptocompare
+from datetime import datetime, timedelta
 
-# Page configuration
-st.set_page_config(
-    page_title="Cryptocurrency Dashboard",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items=None
-)
+# Initialize CryptoCompare
+# Ücretsiz API key almak için: https://min-api.cryptocompare.com/pricing
+cryptocompare.cryptocompare._set_api_key_parameter('YOUR_API_KEY')  # İsteğe bağlı, API key olmadan da çalışır
 
-# Add custom styling
-st.markdown("""
-    <style>
-    .main {
-        padding: 0rem 0rem;
-    }
-    .stApp {
-        background-color: #0e1117;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# Cache timeout in seconds
+CACHE_TIMEOUT = 60
 
-# Initialize Binance client
-api_key = st.secrets.get("BINANCE_API_KEY", "")
-api_secret = st.secrets.get("BINANCE_API_SECRET", "")
-client = Client(api_key, api_secret)
+# Initialize session state for caching
+if 'last_update' not in st.session_state:
+    st.session_state.last_update = {}
+if 'cache' not in st.session_state:
+    st.session_state.cache = {}
 
-# Check if API keys are set
-if not api_key or not api_secret:
-    st.warning("⚠️ Binance API keys are not set. Some features may be limited.")
-
-def get_crypto_pairs():
-    """Fetches USDT pairs from Binance and prepares crypto information"""
-    exchange_info = client.get_exchange_info()
-    
-    # Known cryptocurrency names
-    crypto_names = {
-        'BTC': 'Bitcoin',
-        'ETH': 'Ethereum',
-        'BNB': 'Binance Coin',
-        'XRP': 'Ripple',
-        'ADA': 'Cardano',
-        'DOGE': 'Dogecoin',
-        'SOL': 'Solana',
-        'DOT': 'Polkadot',
-        'MATIC': 'Polygon',
-        'AVAX': 'Avalanche',
-        'LINK': 'Chainlink',
-        'UNI': 'Uniswap',
-        'ATOM': 'Cosmos',
-        'LTC': 'Litecoin',
-        'ETC': 'Ethereum Classic',
-        'ALGO': 'Algorand',
-        'XLM': 'Stellar',
-        'FTM': 'Fantom',
-        'NEAR': 'NEAR Protocol',
-        'FIL': 'Filecoin',
-        'TRX': 'TRON',
-        'SHIB': 'Shiba Inu',
-        'VET': 'VeChain',
-        'SAND': 'The Sandbox',
-        'MANA': 'Decentraland',
-        'AAVE': 'Aave',
-        'THETA': 'Theta Network',
-        'AXS': 'Axie Infinity',
-        'GRT': 'The Graph',
-        'EGLD': 'Elrond'
-    }
-
-    # Get USDT pairs and create dictionary
-    pairs = {}
-    for symbol in exchange_info['symbols']:
-        if symbol['symbol'].endswith('USDT'):
-            crypto_symbol = symbol['baseAsset']  # e.g., BTC, ETH
-            # Show name with symbol if listed, otherwise just symbol
-            display_name = f"{crypto_symbol} - {crypto_names[crypto_symbol]}" if crypto_symbol in crypto_names else crypto_symbol
-            pairs[display_name] = symbol['symbol']
-    
-    # Sort by names
-    return dict(sorted(pairs.items()))
-
-def get_current_price(symbol):
-    """Gets current price for the selected symbol"""
-    try:
-        ticker = client.get_symbol_ticker(symbol=symbol)
-        return float(ticker['price'])
-    except BinanceAPIException as e:
-        st.error(f"Error fetching data: {e}")
-        return None
-
-def get_historical_data(symbol, interval, start_date=None, end_date=None):
-    """Gets historical price data"""
-    try:
-        # Convert dates to timestamps in milliseconds
-        start_ts = int(start_date.timestamp() * 1000) if start_date else None
-        end_ts = int(end_date.timestamp() * 1000) if end_date else None
+def get_cached_data(cache_key, fetch_func, timeout=CACHE_TIMEOUT):
+    """Generic caching function"""
+    current_time = time.time()
+    if (cache_key not in st.session_state.cache or 
+        cache_key not in st.session_state.last_update or 
+        current_time - st.session_state.last_update[cache_key] > timeout):
         
-        # Get klines/candlestick data
-        klines = client.get_klines(
-            symbol=symbol,
-            interval=interval,
-            startTime=start_ts,
-            endTime=end_ts,
-            limit=1000  # Maximum number of data points
-        )
-        
-        if not klines:
-            st.warning("No data available for the selected date range.")
+        try:
+            data = fetch_func()
+            st.session_state.cache[cache_key] = data
+            st.session_state.last_update[cache_key] = current_time
+        except Exception as e:
+            st.error(f"Error fetching data: {str(e)}")
             return None
             
-        df = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 
-                                         'volume', 'close_time', 'quote_volume', 'trades', 
-                                         'taker_buy_base', 'taker_buy_quote', 'ignore'])
-        
-        # Convert timestamp to datetime
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        
-        # Convert string values to float
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-        return df
-    except BinanceAPIException as e:
-        st.error(f"Error fetching data: {e}")
-        return None
+    return st.session_state.cache[cache_key]
 
-def get_24h_stats(symbol):
-    """Gets 24-hour statistics"""
+def get_crypto_list():
+    """Fetches list of cryptocurrencies from CryptoCompare"""
     try:
-        stats = client.get_ticker(symbol=symbol)
-        return {
-            'price_change': float(stats['priceChange']),
-            'price_change_percent': float(stats['priceChangePercent']),
-            'high': float(stats['highPrice']),
-            'low': float(stats['lowPrice']),
-            'volume': float(stats['volume']),
-            'quote_volume': float(stats['quoteVolume']),
-            'count': int(stats['count']),  # Number of trades
-            'weighted_avg_price': float(stats['weightedAvgPrice'])
-        }
-    except BinanceAPIException as e:
-        st.error(f"Error fetching data: {e}")
+        coins = cryptocompare.get_coin_list()
+        return {f"{coin['Symbol'].upper()} - {coin['CoinName']}": coin['Symbol'] 
+                for coin in coins.values() 
+                if coin['Symbol'] and coin['CoinName']}
+    except Exception as e:
+        st.error(f"Error fetching cryptocurrency list: {str(e)}")
+        return {}
+
+def get_historical_data(symbol, vs_currency='USD', days=30):
+    """Gets historical price data"""
+    try:
+        # Para birimi kodunu büyük harfe çevir
+        vs_currency = vs_currency.upper()
+        
+        # Calculate timestamps
+        now = datetime.now()
+        if days == 'max':
+            days = 2000  # yaklaşık 5.5 yıl
+        elif isinstance(days, str):
+            # Gün sayısını sayıya çevir
+            days = int(days.lower().replace('d', ''))
+        
+        # Get historical daily data
+        data = cryptocompare.get_historical_price_day(
+            symbol.upper(),
+            vs_currency,
+            limit=days,
+            exchange='CCCAGG'  # Aggregate of all exchanges
+        )
+        
+        if not data:
+            return None
+            
+        # Create DataFrame
+        df = pd.DataFrame(data)
+        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
+        df = df.rename(columns={
+            'open': 'open',
+            'high': 'high',
+            'low': 'low',
+            'close': 'close',
+            'volumefrom': 'volume'
+        })
+        
+        return df
+    except Exception as e:
+        st.error(f"Error fetching historical data: {str(e)}")
         return None
 
-def calculate_rsi(df, periods=14):
-    """Calculate RSI technical indicator"""
-    close_delta = df['close'].diff()
-    
-    # Make two series: one for lower closes and one for higher closes
-    up = close_delta.clip(lower=0)
-    down = -1 * close_delta.clip(upper=0)
-    
-    # Calculate the EWMA
-    ma_up = up.ewm(com=periods - 1, adjust=True, min_periods=periods).mean()
-    ma_down = down.ewm(com=periods - 1, adjust=True, min_periods=periods).mean()
-    
-    rsi = ma_up / ma_down
-    rsi = 100 - (100/(1 + rsi))
-    return rsi
+def get_current_price(symbol, vs_currency='USD'):
+    """Gets current price for the selected coin"""
+    try:
+        # Para birimi kodunu büyük harfe çevir
+        vs_currency = vs_currency.upper()
+        price = cryptocompare.get_price(symbol.upper(), currency=vs_currency)
+        if price and symbol.upper() in price:
+            return price[symbol.upper()][vs_currency]
+        return None
+    except Exception as e:
+        st.error(f"Error fetching current price: {str(e)}")
+        return None
 
-def calculate_macd(df, fast=12, slow=26, signal=9):
-    """Calculate MACD technical indicator"""
-    # Calculate the MACD and signal line indicators
-    exp1 = df['close'].ewm(span=fast, adjust=False).mean()
-    exp2 = df['close'].ewm(span=slow, adjust=False).mean()
-    macd = exp1 - exp2
-    signal = macd.ewm(span=signal, adjust=False).mean()
-    histogram = macd - signal
-    return macd, signal, histogram
+def get_24h_stats(coin_id):
+    """Get 24-hour statistics for a cryptocurrency"""
+    try:
+        # Get price data
+        price_data = cryptocompare.get_price(coin_id, currency='USD', full=True)
+        if not price_data or 'RAW' not in price_data or coin_id not in price_data['RAW'] or 'USD' not in price_data['RAW'][coin_id]:
+            return None
+            
+        raw_data = price_data['RAW'][coin_id]['USD']
+        
+        return {
+            'high': raw_data['HIGH24HOUR'],
+            'low': raw_data['LOW24HOUR'],
+            'volume': raw_data['VOLUME24HOUR'],
+            'market_cap': raw_data['MKTCAP'],
+            'price_change': raw_data['CHANGE24HOUR'],
+            'price_change_percent': raw_data['CHANGEPCT24HOUR']
+        }
+    except Exception as e:
+        print(f"Error fetching 24h stats: {e}")
+        return None
 
 def create_price_chart(df, currency_code="USD"):
     """Creates candlestick chart with the selected currency"""
-    # Get current exchange rate
-    rates = get_exchange_rates()
-    rate = rates.get(currency_code, 1) if rates else 1
-    
-    # Convert prices to selected currency
-    df_converted = df.copy()
-    df_converted['open'] = df['open'] * rate
-    df_converted['high'] = df['high'] * rate
-    df_converted['low'] = df['low'] * rate
-    df_converted['close'] = df['close'] * rate
-    
-    # Currency symbols for the chart title
-    symbols = {
-        "USD": "$",
-        "EUR": "€",
-        "GBP": "£",
-        "JPY": "¥",
-        "TRY": "₺",
-        "BTC": "₿"
-    }
-    currency_symbol = symbols.get(currency_code, currency_code)
-    
-    fig = go.Figure(data=[go.Candlestick(x=df_converted['timestamp'],
-                                        open=df_converted['open'],
-                                        high=df_converted['high'],
-                                        low=df_converted['low'],
-                                        close=df_converted['close'])])
+    fig = go.Figure(data=[go.Candlestick(
+        x=df['timestamp'],
+        open=df['open'],
+        high=df['high'],
+        low=df['low'],
+        close=df['close']
+    )])
     
     fig.update_layout(
-        title=f'Price Chart ({currency_symbol})',
+        title=f'Price Chart ({currency_code})',
         yaxis_title=f'Price ({currency_code})',
         template='plotly_dark',
         height=600,
@@ -218,10 +146,12 @@ def create_price_chart(df, currency_code="USD"):
 
 def create_volume_chart(df):
     """Creates volume chart"""
-    fig = go.Figure(data=[go.Bar(x=df['timestamp'],
-                                y=df['volume'],
-                                name="Volume",
-                                marker_color='rgba(0,150,255,0.5)')])
+    fig = go.Figure(data=[go.Bar(
+        x=df['timestamp'],
+        y=df['volume'],
+        name="Volume",
+        marker_color='rgba(0,150,255,0.5)'
+    )])
     
     fig.update_layout(
         title='Volume',
@@ -234,14 +164,24 @@ def create_volume_chart(df):
 
 def create_rsi_chart(df):
     """Creates RSI chart"""
-    rsi = calculate_rsi(df)
+    close_delta = df['close'].diff()
     
-    fig = go.Figure(data=[go.Scatter(x=df['timestamp'],
-                                    y=rsi,
-                                    name="RSI",
-                                    line=dict(color='yellow', width=1))])
+    up = close_delta.clip(lower=0)
+    down = -1 * close_delta.clip(upper=0)
     
-    # Add RSI levels
+    ma_up = up.ewm(com=14 - 1, adjust=True, min_periods=14).mean()
+    ma_down = down.ewm(com=14 - 1, adjust=True, min_periods=14).mean()
+    
+    rsi = ma_up / ma_down
+    rsi = 100 - (100/(1 + rsi))
+    
+    fig = go.Figure(data=[go.Scatter(
+        x=df['timestamp'],
+        y=rsi,
+        name="RSI",
+        line=dict(color='yellow', width=1)
+    )])
+    
     fig.add_hline(y=70, line_width=1, line_dash="dash", line_color="red")
     fig.add_hline(y=30, line_width=1, line_dash="dash", line_color="green")
     
@@ -256,27 +196,34 @@ def create_rsi_chart(df):
 
 def create_macd_chart(df):
     """Creates MACD chart"""
-    macd, signal, histogram = calculate_macd(df)
+    exp1 = df['close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['close'].ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=9, adjust=False).mean()
+    histogram = macd - signal
     
     fig = go.Figure()
     
-    # Add MACD line
-    fig.add_trace(go.Scatter(x=df['timestamp'],
-                            y=macd,
-                            name="MACD",
-                            line=dict(color='blue', width=1.5)))
+    fig.add_trace(go.Scatter(
+        x=df['timestamp'],
+        y=macd,
+        name="MACD",
+        line=dict(color='blue', width=1.5)
+    ))
     
-    # Add Signal line
-    fig.add_trace(go.Scatter(x=df['timestamp'],
-                            y=signal,
-                            name="Signal",
-                            line=dict(color='orange', width=1.5)))
+    fig.add_trace(go.Scatter(
+        x=df['timestamp'],
+        y=signal,
+        name="Signal",
+        line=dict(color='orange', width=1.5)
+    ))
     
-    # Add Histogram
-    fig.add_trace(go.Bar(x=df['timestamp'],
-                        y=histogram,
-                        name="Histogram",
-                        marker_color='rgba(255,255,255,0.3)'))
+    fig.add_trace(go.Bar(
+        x=df['timestamp'],
+        y=histogram,
+        name="Histogram",
+        marker_color='rgba(255,255,255,0.3)'
+    ))
     
     fig.update_layout(
         title='MACD (12,26,9)',
@@ -287,90 +234,109 @@ def create_macd_chart(df):
     )
     return fig
 
-def get_exchange_rates():
-    """Gets current exchange rates from ExchangeRate-API"""
-    try:
-        response = requests.get('https://api.exchangerate-api.com/v4/latest/USD')
-        return response.json()['rates']
-    except Exception as e:
-        st.error(f"Error fetching exchange rates: {e}")
-        return None
+def create_metric_card(title, value, delta=None):
+    """Creates a simple metric card"""
+    if delta:
+        delta_color = "#22c55e" if not str(delta).startswith('-') else "#ef4444"
+        return f"""
+        <div class="metric-card">
+            <div class="metric-title">{title}</div>
+            <div class="metric-value">{value}</div>
+            <div class="metric-change {delta_color}">{delta}</div>
+        </div>
+        """
+    else:
+        return f"""
+        <div class="metric-card">
+            <div class="metric-title">{title}</div>
+            <div class="metric-value">{value}</div>
+        </div>
+        """
 
-def convert_price(price, from_currency="USD", to_currency="USD"):
-    """Converts price between currencies"""
-    rates = get_exchange_rates()
-    if rates and to_currency in rates:
-        converted = price * rates[to_currency]
-        return converted
-    return price
+def create_metrics_section(current_price, stats_24h, currency_code):
+    """Creates the metrics section HTML"""
+    return f"""
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-title">Current Price</div>
+            <div class="metric-value">{format_price(current_price, currency_code)}</div>
+            <div class="metric-change {'positive' if stats_24h['price_change_percent'] >= 0 else 'negative'}">{format_change(stats_24h['price_change_percent'])}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">24h High</div>
+            <div class="metric-value">{format_price(stats_24h['high'], currency_code)}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">24h Low</div>
+            <div class="metric-value">{format_price(stats_24h['low'], currency_code)}</div>
+        </div>
+    </div>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-title">24h Volume</div>
+            <div class="metric-value">{format_volume(stats_24h['volume'], currency_code)}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">Market Cap</div>
+            <div class="metric-value">{format_price(stats_24h['market_cap'], currency_code)}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">24h Change</div>
+            <div class="metric-value">{format_price(abs(stats_24h['price_change']), currency_code)}</div>
+            <div class="metric-change {'positive' if stats_24h['price_change_percent'] >= 0 else 'negative'}">{format_change(stats_24h['price_change_percent'])}</div>
+        </div>
+    </div>
+    """
 
 def format_price(price, currency="USD"):
     """Formats price based on its value and currency"""
-    symbols = {
-        "USD": "$",
-        "EUR": "€",
-        "GBP": "£",
-        "JPY": "¥",
-        "TRY": "₺",
-        "BTC": "₿"
-    }
-    
-    symbol = symbols.get(currency, currency)
-    
-    if price == 0:
-        return f"{symbol}0.00"
-    elif price < 0.01:
-        return f"{symbol}{price:.8f}"
-    elif price < 1:
-        return f"{symbol}{price:.6f}"
-    elif price < 100:
-        return f"{symbol}{price:.4f}"
+    if currency == "USD":
+        symbol = "$"
+    elif currency == "EUR":
+        symbol = "€"
     else:
-        return f"{symbol}{price:,.2f}"
-
-def create_metric_card(title, value, delta=None, prefix="", suffix=""):
-    """Creates a modern metric card using HTML/CSS"""
+        symbol = currency + " "
     
-    # Delta bölümü
-    delta_section = ""
-    if delta:
-        try:
-            delta_float = float(delta.replace('%', ''))
-            delta_color = "#22c55e" if delta_float > 0 else "#ef4444"
-            delta_arrow = "▲" if delta_float > 0 else "▼"
-            delta_section = f'<span style="color: {delta_color}; margin-left: 8px; font-size: 14px;">{delta_arrow} {delta}</span>'
-        except:
-            pass
+    # Handle large numbers (billions, millions)
+    if price >= 1_000_000_000:  # Billions
+        return f"{symbol}{price/1_000_000_000:.2f}B"
+    elif price >= 1_000_000:  # Millions
+        return f"{symbol}{price/1_000_000:.2f}M"
+    elif price >= 1_000:  # Thousands
+        return f"{symbol}{price:,.2f}"
+    else:
+        # For small numbers, show more decimals if needed
+        if price < 0.01:
+            return f"{symbol}{price:.8f}"
+        elif price < 1:
+            return f"{symbol}{price:.4f}"
+        else:
+            return f"{symbol}{price:,.2f}"
 
-    html = f"""
-    <div style="
-        background: linear-gradient(145deg, rgba(26,26,26,0.9), rgba(32,32,32,0.9));
-        border-radius: 16px;
-        padding: 20px;
-        margin: 10px 0px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        border: 1px solid rgba(255,255,255,0.1);
-    ">
-        <p style="
-            color: rgba(255,255,255,0.6);
-            font-size: 14px;
-            font-weight: 500;
-            margin: 0 0 8px 0;
-        ">{title}</p>
-        <p style="
-            color: white;
-            font-size: 24px;
-            font-weight: 600;
-            margin: 0;
-            display: flex;
-            align-items: center;
-        ">{prefix}{value}{suffix}{delta_section}</p>
-    </div>
-    """
-    return st.markdown(html, unsafe_allow_html=True)
+def format_change(value):
+    """Formats percentage change values"""
+    return f"{value:+.2f}%" if value else "0.00%"
+
+def format_volume(volume, currency="USD"):
+    """Formats volume with appropriate suffixes"""
+    if currency == "USD":
+        symbol = "$"
+    elif currency == "EUR":
+        symbol = "€"
+    else:
+        symbol = currency + " "
+    
+    if volume >= 1_000_000_000:  # Billions
+        return f"{symbol}{volume/1_000_000_000:.2f}B"
+    elif volume >= 1_000_000:  # Millions
+        return f"{symbol}{volume/1_000_000:.2f}M"
+    else:
+        return f"{symbol}{volume:,.0f}"
 
 def main():
-    # Custom CSS for the dashboard
+    st.title("Cryptocurrency Dashboard")
+    
+    # Add custom styling
     st.markdown("""
         <style>
         .stApp {
@@ -378,54 +344,100 @@ def main():
         }
         .main {
             padding: 0;
+            max-width: 100%;
+        }
+        .block-container {
+            max-width: 100%;
+            padding: 1rem;
         }
         h1 {
             color: white;
-            font-size: 2.5em;
+            font-size: 2rem;
             font-weight: 600;
-            margin: 0.5rem 0;
-            padding-left: 1rem;
-        }
-        .stMetric {
-            background: none !important;
-            border: none !important;
+            margin-bottom: 1.5rem;
         }
         .sidebar-logo {
             display: block;
-            margin: 0 auto 0.5rem auto;
-            width: 30%;
-            padding: 0;
+            margin: 0 auto 1rem auto;
+            width: 80px;
         }
-        #MainMenu {
-            visibility: hidden;
+        
+        /* Metric Cards Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin: 1rem 0;
+            width: 100%;
         }
-        footer {
-            visibility: hidden;
+        
+        /* Responsive Grid */
+        @media screen and (max-width: 1200px) {
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
-        header {
-            visibility: hidden;
+        
+        @media screen and (max-width: 768px) {
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+            .block-container {
+                padding: 0.5rem;
+            }
+            .metric-card {
+                padding: 1rem;
+            }
+            h1 {
+                font-size: 1.5rem;
+                margin-bottom: 1rem;
+            }
         }
-        .block-container {
-            padding-top: 0;
-            margin-top: 0;
+        
+        /* Metric Card */
+        .metric-card {
+            background: linear-gradient(145deg, #1E1E1E, #2D2D2D);
+            border-radius: 10px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            min-height: 120px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
         }
-        [data-testid="stSidebarNav"] {
-            padding-top: 0;
+        
+        .metric-title {
+            color: #808080;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
         }
-        section[data-testid="stSidebar"] > div {
-            padding-top: 0;
+        
+        .metric-value {
+            color: white;
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            word-break: break-word;
         }
-        section[data-testid="stSidebar"] {
-            padding-top: 0;
+        
+        .metric-change {
+            font-size: 0.9rem;
         }
-        .stMarkdown {
-            margin-top: 0;
+        
+        .metric-change.positive {
+            color: #22c55e;
         }
+        
+        .metric-change.negative {
+            color: #ef4444;
+        }
+        
+        /* Hide Streamlit branding */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
         </style>
     """, unsafe_allow_html=True)
 
-    st.title("Cryptocurrency Dashboard")
-    
     # Sidebar
     with st.sidebar:
         # Logo
@@ -437,17 +449,21 @@ def main():
         st.subheader("Settings")
         
         # Cryptocurrency selection
-        pairs = get_crypto_pairs()
-        crypto_list = list(pairs.keys())
+        crypto_list = get_crypto_list()
+        if not crypto_list:
+            st.error("Unable to fetch cryptocurrency list")
+            st.stop()
+            
         # Find and set BTC as default
         default_index = 0
-        for i, name in enumerate(crypto_list):
+        crypto_names = list(crypto_list.keys())
+        for i, name in enumerate(crypto_names):
             if name.startswith('BTC -'):
                 default_index = i
                 break
         
-        selected_crypto = st.selectbox("Select Cryptocurrency:", crypto_list, index=default_index)
-        selected_symbol = pairs[selected_crypto]  # Full symbol (e.g., BTCUSDT)
+        selected_crypto = st.selectbox("Select Cryptocurrency:", crypto_names, index=default_index)
+        selected_coin_id = crypto_list[selected_crypto]
         
         # Currency selection
         currencies = {
@@ -455,8 +471,7 @@ def main():
             "Euro": "EUR",
             "British Pound": "GBP",
             "Japanese Yen": "JPY",
-            "Turkish Lira": "TRY",
-            "Bitcoin": "BTC"
+            "Turkish Lira": "TRY"
         }
         
         selected_currency = st.selectbox(
@@ -468,181 +483,49 @@ def main():
         
         # Time interval selection
         intervals = {
-            '1 Month': Client.KLINE_INTERVAL_1MONTH,
-            '1 Week': Client.KLINE_INTERVAL_1WEEK,
-            '1 Day': Client.KLINE_INTERVAL_1DAY,
-            '4 Hours': Client.KLINE_INTERVAL_4HOUR,
-            '1 Hour': Client.KLINE_INTERVAL_1HOUR,
-            '15 Minutes': Client.KLINE_INTERVAL_15MINUTE,
-            '5 Minutes': Client.KLINE_INTERVAL_5MINUTE,
-            '1 Minute': Client.KLINE_INTERVAL_1MINUTE
+            '1 Day': 1,
+            '7 Days': 7,
+            '30 Days': 30,
+            '90 Days': 90,
+            '180 Days': 180,
+            '1 Year': 365,
+            'Max': 'max'
         }
+        
         selected_interval = st.selectbox(
             "Select Time Interval",
             list(intervals.keys()),
-            index=list(intervals.keys()).index("1 Day")
+            index=2
         )
-        
-        # Date range
-        col1, col2 = st.columns(2)
-        with col1:
-            start_date = st.date_input(
-                "Start Date",
-                value=datetime(datetime.now().year, 1, 1)
-            )
-        with col2:
-            end_date = st.date_input(
-                "End Date",
-                value=datetime.now()
-            )
+        days = intervals[selected_interval]
     
-    # Convert dates to datetime
-    start_datetime = datetime.combine(start_date, datetime.min.time())
-    end_datetime = datetime.combine(end_date, datetime.max.time())
-    
-    # Get crypto name
-    crypto_names = {
-        'BTC': 'Bitcoin',
-        'ETH': 'Ethereum',
-        'BNB': 'Binance Coin',
-        'XRP': 'Ripple',
-        'ADA': 'Cardano',
-        'DOGE': 'Dogecoin',
-        'SOL': 'Solana',
-        'DOT': 'Polkadot',
-        'MATIC': 'Polygon',
-        'AVAX': 'Avalanche',
-        'LINK': 'Chainlink',
-        'UNI': 'Uniswap',
-        'ATOM': 'Cosmos',
-        'LTC': 'Litecoin',
-        'ETC': 'Ethereum Classic',
-        'ALGO': 'Algorand',
-        'XLM': 'Stellar',
-        'FTM': 'Fantom',
-        'NEAR': 'NEAR Protocol',
-        'FIL': 'Filecoin',
-        'TRX': 'TRON',
-        'SHIB': 'Shiba Inu',
-        'VET': 'VeChain',
-        'SAND': 'The Sandbox',
-        'MANA': 'Decentraland',
-        'AAVE': 'Aave',
-        'THETA': 'Theta Network',
-        'AXS': 'Axie Infinity',
-        'GRT': 'The Graph',
-        'EGLD': 'Elrond'
-    }
-    selected_crypto = crypto_names.get(selected_symbol.replace('USDT', ''), selected_symbol)
-    st.subheader(selected_crypto)
-    
-    # Main metrics
-    current_price = get_current_price(selected_symbol)
-    stats_24h = get_24h_stats(selected_symbol)
+    # Get current price and stats
+    current_price = get_current_price(selected_coin_id, currency_code)
+    stats_24h = get_24h_stats(selected_coin_id)
     
     if current_price and stats_24h:
-        # Create container for metrics
-        with st.container():
-            # First row of metrics
-            col1, col2, col3, col4 = st.columns(4)
-            
-            # Convert prices to selected currency
-            current_price_converted = convert_price(current_price, "USD", currency_code)
-            high_converted = convert_price(stats_24h['high'], "USD", currency_code)
-            low_converted = convert_price(stats_24h['low'], "USD", currency_code)
-            avg_converted = convert_price(stats_24h['weighted_avg_price'], "USD", currency_code)
-            
-            with col1:
-                create_metric_card(
-                    "Current Price",
-                    format_price(current_price_converted, currency_code),
-                    f"{stats_24h['price_change_percent']:.2f}%"
-                )
-            with col2:
-                create_metric_card(
-                    "24h High",
-                    format_price(high_converted, currency_code)
-                )
-            with col3:
-                create_metric_card(
-                    "24h Low",
-                    format_price(low_converted, currency_code)
-                )
-            with col4:
-                create_metric_card(
-                    "24h Weighted Avg",
-                    format_price(avg_converted, currency_code)
-                )
-            
-            # Second row of metrics
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                volatility = ((stats_24h['high'] - stats_24h['low']) / stats_24h['low']) * 100
-                create_metric_card(
-                    "24h Volatility",
-                    f"{volatility:.2f}",
-                    suffix="%"
-                )
-            with col2:
-                volume_btc = stats_24h['volume']
-                create_metric_card(
-                    "24h Volume (Crypto)",
-                    f"{volume_btc:,.2f}",
-                    suffix=f" {selected_symbol.replace('USDT', '')}"
-                )
-            with col3:
-                volume_usd = stats_24h['quote_volume']
-                create_metric_card(
-                    "24h Volume (USD)",
-                    f"{volume_usd:,.0f}",
-                    prefix="$"
-                )
-            with col4:
-                create_metric_card(
-                    "24h Trades",
-                    f"{stats_24h['count']:,}",
-                    suffix=" trades"
-                )
-
-        # Add a separator with gradient
-        st.markdown("""
-            <div style="
-                height: 2px;
-                background: linear-gradient(90deg, 
-                    rgba(255,255,255,0) 0%, 
-                    rgba(255,255,255,0.1) 50%, 
-                    rgba(255,255,255,0) 100%
-                );
-                margin: 2rem 0;
-            "></div>
-        """, unsafe_allow_html=True)
+        metrics_html = create_metrics_section(current_price, stats_24h, currency_code)
+        st.markdown(metrics_html, unsafe_allow_html=True)
+    else:
+        st.error("Could not fetch price data. Please try again.")
     
-    # Chart section
-    df = get_historical_data(selected_symbol, intervals[selected_interval], start_datetime, end_datetime)
+    # Get and display historical data
+    df = get_historical_data(selected_coin_id, currency_code, days)
     if df is not None:
-        # Price chart (full width)
-        st.plotly_chart(create_price_chart(df, currency_code), use_container_width=True)
+        # Create tabs for different charts
+        tab1, tab2, tab3, tab4 = st.tabs(["Price", "Volume", "RSI", "MACD"])
         
-        # Volume chart (full width)
-        st.plotly_chart(create_volume_chart(df), use_container_width=True)
+        with tab1:
+            st.plotly_chart(create_price_chart(df, currency_code), use_container_width=True)
         
-        # RSI and MACD in two columns
-        col1, col2 = st.columns(2)
+        with tab2:
+            st.plotly_chart(create_volume_chart(df), use_container_width=True)
         
-        with col1:
+        with tab3:
             st.plotly_chart(create_rsi_chart(df), use_container_width=True)
-            
-        with col2:
+        
+        with tab4:
             st.plotly_chart(create_macd_chart(df), use_container_width=True)
-    
-    # Volume and other statistics
-    if stats_24h:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info(f"24h Volume: {stats_24h['volume']:.2f} {selected_crypto.split(' - ')[0]}")
-        with col2:
-            st.info(f"24h USD Volume: ${stats_24h['quote_volume']:,.2f}")
 
 if __name__ == "__main__":
     main()
