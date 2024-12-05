@@ -17,7 +17,7 @@ A real-time cryptocurrency tracking dashboard built with Streamlit and CryptoCom
 1. Clone the repository:
 ```bash
 git clone https://github.com/metastaban/crypto-dashboard.git
-cd financial_dashboard
+cd crypto-dashboard
 ```
 
 2. Create a virtual environment (recommended):

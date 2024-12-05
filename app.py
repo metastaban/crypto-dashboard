@@ -253,8 +253,12 @@ def create_metric_card(title, value, delta=None):
         </div>
         """
 
-def create_metrics_section(current_price, stats_24h, currency_code):
-    """Creates the metrics section HTML"""
+def create_metrics_section(current_price, stats_24h, selected_coin_id, currency_code):
+    """Create the metrics section with current price and 24h stats"""
+    
+    # Add subheader with selected options
+    st.markdown(f'<div class="subheader">{selected_coin_id}/{currency_code}</div>', unsafe_allow_html=True)
+    
     return f"""
     <div class="metrics-grid">
         <div class="metric-card">
@@ -334,6 +338,13 @@ def format_volume(volume, currency="USD"):
         return f"{symbol}{volume:,.0f}"
 
 def main():
+    # Set page config for favicon and title
+    st.set_page_config(
+        page_title="Crypto Dashboard",
+        page_icon="🚀",  # Geçici olarak bir emoji kullanıyoruz
+        layout="wide"
+    )
+    
     st.title("Cryptocurrency Dashboard")
     
     # Add custom styling
@@ -354,6 +365,12 @@ def main():
             color: white;
             font-size: 2rem;
             font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .subheader {
+            color: white;
+            font-size: 1.2rem;
+            font-weight: 500;
             margin-bottom: 1.5rem;
         }
         .sidebar-logo {
@@ -498,13 +515,13 @@ def main():
             index=2
         )
         days = intervals[selected_interval]
-    
+        
     # Get current price and stats
     current_price = get_current_price(selected_coin_id, currency_code)
     stats_24h = get_24h_stats(selected_coin_id)
     
     if current_price and stats_24h:
-        metrics_html = create_metrics_section(current_price, stats_24h, currency_code)
+        metrics_html = create_metrics_section(current_price, stats_24h, selected_coin_id, currency_code)
         st.markdown(metrics_html, unsafe_allow_html=True)
     else:
         st.error("Could not fetch price data. Please try again.")
