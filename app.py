@@ -30,7 +30,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Initialize Binance client
-client = Client()
+api_key = st.secrets.get("BINANCE_API_KEY", "")
+api_secret = st.secrets.get("BINANCE_API_SECRET", "")
+client = Client(api_key, api_secret)
+
+# Check if API keys are set
+if not api_key or not api_secret:
+    st.warning("⚠️ Binance API keys are not set. Some features may be limited.")
 
 def get_crypto_pairs():
     """Fetches USDT pairs from Binance and prepares crypto information"""
