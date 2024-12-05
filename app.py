@@ -287,7 +287,6 @@ def create_metrics_section(current_price, stats_24h, selected_coin_id, currency_
         <div class="metric-card">
             <div class="metric-title">24h Change</div>
             <div class="metric-value">{format_price(abs(stats_24h['price_change']), currency_code)}</div>
-            <div class="metric-change {'positive' if stats_24h['price_change_percent'] >= 0 else 'negative'}">{format_change(stats_24h['price_change_percent'])}</div>
         </div>
     </div>
     """
